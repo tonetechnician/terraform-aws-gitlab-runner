@@ -1,6 +1,15 @@
-output "runner_as_group_name" {
-  description = "Name of the autoscaling group for the gitlab-runner instance"
-  value       = aws_autoscaling_group.gitlab_runner_instance.name
+// output "runner_as_group_name" {
+//   description = "Name of the autoscaling group for the gitlab-runner instance"
+//   value       = var.use_asg ? aws_autoscaling_group.gitlab_runner_instance.name : null
+// }
+output "runner_instance_id" {
+  description = "AWS gitlab runner instance ID"
+  value       = aws_instance.gitlab_runner_instance[0].id
+}
+
+output "runner_instance_arn" {
+  description = "AWS gitlab runner instance ID"
+  value       = aws_instance.gitlab_runner_instance[0].arn
 }
 
 output "runner_cache_bucket_arn" {

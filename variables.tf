@@ -813,3 +813,9 @@ variable "asg_terminate_lifecycle_lambda_timeout" {
   default     = 30
   type        = number
 }
+
+variable "use_asg" {
+  description = "Use autoscaling group or aws instance."
+  default = false
+  type    = bool
+}

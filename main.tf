@@ -143,63 +143,77 @@ data "aws_ami" "docker_machine" {
   owners = var.runner_ami_owners
 }
 
-resource "aws_autoscaling_group" "gitlab_runner_instance" {
-  name                      = var.enable_asg_recreation ? "${aws_launch_template.gitlab_runner_instance.name}-asg" : "${var.environment}-as-group"
-  vpc_zone_identifier       = length(var.subnet_id) > 0 ? [var.subnet_id] : var.subnet_ids_gitlab_runner
-  min_size                  = "1"
-  max_size                  = "1"
-  desired_capacity          = "1"
-  health_check_grace_period = 0
-  max_instance_lifetime     = var.asg_max_instance_lifetime
-  enabled_metrics           = var.metrics_autoscaling
+resource "aws_instance" "gitlab_runner_instance" {
+  count      = var.use_asg ? 0 : 1
 
-  dynamic "tag" {
-    for_each = local.agent_tags
-
-    content {
-      key                 = tag.key
-      value               = tag.value
-      propagate_at_launch = true
-    }
-  }
+  subnet_id  = var.subnet_id
 
   launch_template {
     id      = aws_launch_template.gitlab_runner_instance.id
     version = aws_launch_template.gitlab_runner_instance.latest_version
   }
 
-  instance_refresh {
-    strategy = "Rolling"
-    preferences {
-      min_healthy_percentage = 0
-    }
-    triggers = ["tag"]
-  }
-
-  timeouts {
-    delete = var.asg_delete_timeout
-  }
+  tags  = local.agent_tags
 }
 
-resource "aws_autoscaling_schedule" "scale_in" {
-  count                  = var.enable_schedule ? 1 : 0
-  autoscaling_group_name = aws_autoscaling_group.gitlab_runner_instance.name
-  scheduled_action_name  = "scale_in-${aws_autoscaling_group.gitlab_runner_instance.name}"
-  recurrence             = var.schedule_config["scale_in_recurrence"]
-  min_size               = var.schedule_config["scale_in_count"]
-  desired_capacity       = var.schedule_config["scale_in_count"]
-  max_size               = var.schedule_config["scale_in_count"]
-}
+// resource "aws_autoscaling_group" "gitlab_runner_instance" {
+//   count                     = var.use_asg ? 1 : 0
+//   name                      = var.enable_asg_recreation ? "${aws_launch_template.gitlab_runner_instance.name}-asg" : "${var.environment}-as-group"
+//   vpc_zone_identifier       = length(var.subnet_id) > 0 ? [var.subnet_id] : var.subnet_ids_gitlab_runner
+//   min_size                  = "1"
+//   max_size                  = "1"
+//   desired_capacity          = "1"
+//   health_check_grace_period = 0
+//   max_instance_lifetime     = var.asg_max_instance_lifetime
+//   enabled_metrics           = var.metrics_autoscaling
 
-resource "aws_autoscaling_schedule" "scale_out" {
-  count                  = var.enable_schedule ? 1 : 0
-  autoscaling_group_name = aws_autoscaling_group.gitlab_runner_instance.name
-  scheduled_action_name  = "scale_out-${aws_autoscaling_group.gitlab_runner_instance.name}"
-  recurrence             = var.schedule_config["scale_out_recurrence"]
-  min_size               = var.schedule_config["scale_out_count"]
-  desired_capacity       = var.schedule_config["scale_out_count"]
-  max_size               = var.schedule_config["scale_out_count"]
-}
+//   dynamic "tag" {
+//     for_each = local.agent_tags
+
+//     content {
+//       key                 = tag.key
+//       value               = tag.value
+//       propagate_at_launch = true
+//     }
+//   }
+
+//   launch_template {
+//     id      = aws_launch_template.gitlab_runner_instance.id
+//     version = aws_launch_template.gitlab_runner_instance.latest_version
+//   }
+
+//   instance_refresh {
+//     strategy = "Rolling"
+//     preferences {
+//       min_healthy_percentage = 0
+//     }
+//     triggers = ["tag"]
+//   }
+
+//   timeouts {
+//     delete = var.asg_delete_timeout
+//   }
+// }
+
+// resource "aws_autoscaling_schedule" "scale_in" {
+//   count                  = var.enable_schedule && var.use_asg ? 1 : 0
+//   autoscaling_group_name = aws_autoscaling_group.gitlab_runner_instance.name
+//   scheduled_action_name  = "scale_in-${aws_autoscaling_group.gitlab_runner_instance.name}"
+//   recurrence             = var.schedule_config["scale_in_recurrence"]
+//   min_size               = var.schedule_config["scale_in_count"]
+//   desired_capacity       = var.schedule_config["scale_in_count"]
+//   max_size               = var.schedule_config["scale_in_count"]
+// }
+
+// resource "aws_autoscaling_schedule" "scale_out" {
+//   count                  = var.enable_schedule && var.use_asg ? 1 : 0
+//   autoscaling_group_name = aws_autoscaling_group.gitlab_runner_instance.name
+//   scheduled_action_name  = "scale_out-${aws_autoscaling_group.gitlab_runner_instance.name}"
+//   recurrence             = var.schedule_config["scale_out_recurrence"]
+//   min_size               = var.schedule_config["scale_out_count"]
+//   desired_capacity       = var.schedule_config["scale_out_count"]
+//   max_size               = var.schedule_config["scale_out_count"]
+// }
 
 data "aws_ami" "runner" {
   most_recent = "true"
@@ -494,21 +508,21 @@ resource "aws_iam_role_policy_attachment" "eip" {
 ################################################################################
 ### Lambda function for ASG instance termination lifecycle hook
 ################################################################################
-module "terminate_instances_lifecycle_function" {
-  source = "./modules/terminate-instances"
+// module "terminate_instances_lifecycle_function" {
+//   source = "./modules/terminate-instances"
 
-  count = var.asg_terminate_lifecycle_hook_create ? 1 : 0
+//   count = var.asg_terminate_lifecycle_hook_create ? 1 : 0
 
-  name                                 = var.asg_terminate_lifecycle_hook_name == null ? "terminate-instances" : var.asg_terminate_lifecycle_hook_name
-  environment                          = var.environment
-  asg_arn                              = aws_autoscaling_group.gitlab_runner_instance.arn
-  asg_name                             = aws_autoscaling_group.gitlab_runner_instance.name
-  cloudwatch_logging_retention_in_days = var.cloudwatch_logging_retention_in_days
-  lambda_memory_size                   = var.asg_terminate_lifecycle_lambda_memory_size
-  lambda_runtime                       = var.asg_terminate_lifecycle_lambda_runtime
-  lifecycle_heartbeat_timeout          = var.asg_terminate_lifecycle_hook_heartbeat_timeout
-  name_iam_objects                     = local.name_iam_objects
-  role_permissions_boundary            = var.permissions_boundary == "" ? null : "${var.arn_format}:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary}"
-  lambda_timeout                       = var.asg_terminate_lifecycle_lambda_timeout
-  tags                                 = local.tags
-}
+//   name                                 = var.asg_terminate_lifecycle_hook_name == null ? "terminate-instances" : var.asg_terminate_lifecycle_hook_name
+//   environment                          = var.environment
+//   asg_arn                              = aws_autoscaling_group.gitlab_runner_instance.arn
+//   asg_name                             = aws_autoscaling_group.gitlab_runner_instance.name
+//   cloudwatch_logging_retention_in_days = var.cloudwatch_logging_retention_in_days
+//   lambda_memory_size                   = var.asg_terminate_lifecycle_lambda_memory_size
+//   lambda_runtime                       = var.asg_terminate_lifecycle_lambda_runtime
+//   lifecycle_heartbeat_timeout          = var.asg_terminate_lifecycle_hook_heartbeat_timeout
+//   name_iam_objects                     = local.name_iam_objects
+//   role_permissions_boundary            = var.permissions_boundary == "" ? null : "${var.arn_format}:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary}"
+//   lambda_timeout                       = var.asg_terminate_lifecycle_lambda_timeout
+//   tags                                 = local.tags
+// }
